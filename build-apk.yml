@@ -1,0 +1,62 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      VITE_AUTH_ENABLED: "false"
+      APP_ID: com.freechess.app
+      APP_NAME: Свободные шахматы
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install deps
+        run: npm install --no-audit --no-fund
+
+      - name: Build web (SPA)
+        run: npx vite build --config vite.config.apk.ts
+
+      - name: Collect web files into www/
+        run: |
+          rm -rf www && mkdir www
+          cp -r dist/client/. www/
+          # запасной вариант, если TanStack отдал _shell.html вместо index.html
+          [ -f www/index.html ] || cp www/_shell.html www/index.html
+          ls -la www
+
+      - name: Add Capacitor + Android
+        run: |
+          npm install --no-save --no-audit --no-fund @capacitor/core @capacitor/cli @capacitor/android
+          cat > capacitor.config.json <<JSON
+          {
+            "appId": "${APP_ID}",
+            "appName": "${APP_NAME}",
+            "webDir": "www"
+          }
+          JSON
+          npx cap add android
+          npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chess-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
